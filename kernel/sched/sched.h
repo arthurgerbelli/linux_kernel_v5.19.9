@@ -213,14 +213,11 @@ static inline int css_policy(int policy)
 static inline bool valid_policy(int policy)
 {
 	return idle_policy(policy) || fair_policy(policy) ||
-		
+	rt_policy(policy) || dl_policy(policy)
 #ifdef CONFIG_MOKER_SCHED_CSS_POLICY
-		rt_policy(policy) || dl_policy(policy)
-		|| css_policy(policy);
-#else
-		rt_policy(policy) || dl_policy(policy);
-
+	|| css_policy(policy)
 #endif
+	;
 
 }
 
@@ -238,6 +235,12 @@ static inline int task_has_dl_policy(struct task_struct *p)
 {
 	return dl_policy(p->policy);
 }
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+static inline int task_has_css_policy(struct task_struct *p)
+{
+	return css_policy(p->policy);
+}
+#endif
 
 #define cap_scale(v, s) ((v)*(s) >> SCHED_CAPACITY_SHIFT)
 
@@ -288,6 +291,7 @@ dl_entity_preempt(struct sched_dl_entity *a, struct sched_dl_entity *b)
 	return dl_entity_is_special(a) ||
 	       dl_time_before(a->deadline, b->deadline);
 }
+// TODO CSS: probably we have to implement this
 
 /*
  * This is the priority-queue data structure of the RT scheduling class:
