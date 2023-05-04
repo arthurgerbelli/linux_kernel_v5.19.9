@@ -127,15 +127,15 @@
 
 
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
 
 #define SCHED_DATA 		\
   STRUCT_ALIGN(); 		\
   __sched_class_highest = .; 	\
   *(__stop_sched_class) 	\
+  *(__css_sched_class) 		\
   *(__dl_sched_class) 		\
   *(__rt_sched_class) 		\
-  *(__lf_sched_class) 		\
   *(__fair_sched_class) 	\
   *(__idle_sched_class)		\
   __sched_class_lowest = .;
