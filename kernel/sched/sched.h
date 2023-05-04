@@ -99,8 +99,8 @@
 #include "../moker/mktrace.h"
 #endif
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-#include "../moker/lf_rq.h"
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+#include "../moker/css_rq.h"
 #endif
 
 struct rq;
@@ -203,10 +203,10 @@ static inline int dl_policy(int policy)
 	return policy == SCHED_DEADLINE;
 }
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-static inline int lf_policy(int policy)
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+static inline int css_policy(int policy)
 {
-	return policy == SCHED_LIFO;
+	return policy == SCHED_CSS;
 }
 #endif
 
@@ -214,9 +214,9 @@ static inline bool valid_policy(int policy)
 {
 	return idle_policy(policy) || fair_policy(policy) ||
 		
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
 		rt_policy(policy) || dl_policy(policy)
-		|| lf_policy(policy);
+		|| css_policy(policy);
 #else
 		rt_policy(policy) || dl_policy(policy);
 
@@ -978,8 +978,8 @@ struct rq {
 	struct rt_rq		rt;
 	struct dl_rq		dl;
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-	struct lf_rq lf;
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	struct css_rq css;
 #endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
@@ -2239,8 +2239,8 @@ extern struct sched_class __sched_class_lowest[];
 extern const struct sched_class stop_sched_class;
 extern const struct sched_class dl_sched_class;
 extern const struct sched_class rt_sched_class;
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-extern const struct sched_class lf_sched_class;
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+extern const struct sched_class css_sched_class;
 #endif
 extern const struct sched_class fair_sched_class;
 extern const struct sched_class idle_sched_class;

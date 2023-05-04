@@ -9,8 +9,8 @@ bool "MOKER tracing"
 default y
 depends on MOKER_FRAMEWORK
 
-config MOKER_SCHED_LIFO_POLICY
-bool "MOKER scheduling policy: LIFO"
+config MOKER_SCHED_CSS_POLICY
+bool "MOKER scheduling policy: CSS"
 default y
 depends on MOKER_FRAMEWORK
 
