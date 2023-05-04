@@ -5432,6 +5432,12 @@ void scheduler_tick(void)
 
 	rq_unlock(rq, &rf);
 
+/*
+#ifdef CONFIG_MOKER_TRACING
+	moker_trace(SCHED_TICK,curr);
+#endif
+*/
+
 	if (sched_feat(LATENCY_WARN) && resched_latency)
 		resched_latency_warn(cpu, resched_latency);
 
@@ -6464,6 +6470,18 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 		trace_sched_switch(sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
 
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+	if(lf_policy(prev->policy)|| lf_policy(next->policy)){
+#endif
+
+#ifdef CONFIG_MOKER_TRACING
+		moker_trace(SWITCH_AWAY, prev);
+		moker_trace(SWITCH_TO, next);
+#endif
+
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+}
+#endif
 		/* Also unlocks the rq: */
 		rq = context_switch(rq, prev, next, &rf);
 	} else {
@@ -6800,6 +6818,11 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
 	else
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+	if(lf_policy(p->policy))
+	p->sched_class = &lf_sched_class;
+	else
+#endif
 		p->sched_class = &fair_sched_class;
 
 	p->prio = prio;
@@ -9583,9 +9606,17 @@ void __init sched_init(void)
 	int i;
 
 	/* Make sure the linker didn't screw up */
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
 	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
-	       &fair_sched_class != &rt_sched_class + 1 ||
-	       &rt_sched_class   != &dl_sched_class + 1);
+		&fair_sched_class != &lf_sched_class + 1 ||
+		&lf_sched_class != &rt_sched_class + 1 ||
+		&rt_sched_class != &dl_sched_class + 1);
+#else
+	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
+		&fair_sched_class != &rt_sched_class + 1 ||
+		&rt_sched_class != &dl_sched_class + 1);
+#endif
+	
 #ifdef CONFIG_SMP
 	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
 #endif
@@ -9660,6 +9691,11 @@ void __init sched_init(void)
 		init_cfs_rq(&rq->cfs);
 		init_rt_rq(&rq->rt);
 		init_dl_rq(&rq->dl);
+
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+		init_lf_rq(&rq->lf);
+#endif
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 		INIT_LIST_HEAD(&rq->leaf_cfs_rq_list);
 		rq->tmp_alone_branch = &rq->leaf_cfs_rq_list;

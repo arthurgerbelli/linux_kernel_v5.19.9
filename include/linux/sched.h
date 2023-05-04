@@ -36,6 +36,10 @@
 #include <linux/kcsan.h>
 #include <asm/kmap_size.h>
 
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+#include "../../kernel/moker/lf_task.h"
+#endif
+
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
 struct backing_dev_info;
@@ -778,6 +782,10 @@ struct task_struct {
 	struct sched_rt_entity		rt;
 	struct sched_dl_entity		dl;
 	const struct sched_class	*sched_class;
+
+#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+	struct sched_lf_entity lf;
+#endif	
 
 #ifdef CONFIG_SCHED_CORE
 	struct rb_node			core_node;
