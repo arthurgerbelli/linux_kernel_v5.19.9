@@ -6470,8 +6470,8 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 		trace_sched_switch(sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-	if(lf_policy(prev->policy)|| lf_policy(next->policy)){
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if(css_policy(prev->policy)|| css_policy(next->policy)){
 #endif
 
 #ifdef CONFIG_MOKER_TRACING
@@ -6479,7 +6479,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 		moker_trace(SWITCH_TO, next);
 #endif
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
 }
 #endif
 		/* Also unlocks the rq: */
@@ -6813,16 +6813,17 @@ EXPORT_SYMBOL(default_wake_function);
 
 static void __setscheduler_prio(struct task_struct *p, int prio)
 {
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if(css_policy(p->policy))
+		p->sched_class = &css_sched_class;
+	else if (dl_prio(prio))
+#else
 	if (dl_prio(prio))
+#endif
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
 	else
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-	if(lf_policy(p->policy))
-	p->sched_class = &lf_sched_class;
-	else
-#endif
 		p->sched_class = &fair_sched_class;
 
 	p->prio = prio;
@@ -9606,11 +9607,11 @@ void __init sched_init(void)
 	int i;
 
 	/* Make sure the linker didn't screw up */
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
 	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
-		&fair_sched_class != &lf_sched_class + 1 ||
-		&lf_sched_class != &rt_sched_class + 1 ||
-		&rt_sched_class != &dl_sched_class + 1);
+		&fair_sched_class != &rt_sched_class + 1 ||
+		&rt_sched_class != &dl_sched_class + 1 ||
+		&dl_sched_class != &css_sched_class + 1);
 #else
 	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
 		&fair_sched_class != &rt_sched_class + 1 ||
@@ -9692,8 +9693,8 @@ void __init sched_init(void)
 		init_rt_rq(&rq->rt);
 		init_dl_rq(&rq->dl);
 
-#ifdef CONFIG_MOKER_SCHED_LIFO_POLICY
-		init_lf_rq(&rq->lf);
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+		init_css_rq(&rq->css);
 #endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
