@@ -65,6 +65,10 @@
 #include <linux/wait_api.h>
 #include <linux/workqueue_api.h>
 
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+#include "../moker/css_rq.h"
+#endif
+
 #ifdef CONFIG_PREEMPT_DYNAMIC
 # ifdef CONFIG_GENERIC_ENTRY
 #  include <linux/entry-common.h>
@@ -5432,6 +5436,12 @@ void scheduler_tick(void)
 
 	rq_unlock(rq, &rf);
 
+/*
+#ifdef CONFIG_MOKER_TRACING
+	moker_trace(SCHED_TICK,curr);
+#endif
+*/
+
 	if (sched_feat(LATENCY_WARN) && resched_latency)
 		resched_latency_warn(cpu, resched_latency);
 
@@ -6464,6 +6474,18 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 
 		trace_sched_switch(sched_mode & SM_MASK_PREEMPT, prev, next, prev_state);
 
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if(css_policy(prev->policy) || css_policy(next->policy)){
+#endif
+
+#ifdef CONFIG_MOKER_TRACING
+		moker_trace(SWITCH_AWAY, prev);
+		moker_trace(SWITCH_TO, next);
+#endif
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	}
+#endif
 		/* Also unlocks the rq: */
 		rq = context_switch(rq, prev, next, &rf);
 	} else {
@@ -6799,7 +6821,12 @@ static void __setscheduler_prio(struct task_struct *p, int prio)
 		p->sched_class = &dl_sched_class;
 	else if (rt_prio(prio))
 		p->sched_class = &rt_sched_class;
+else
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if(css_policy(p->policy))
+		p->sched_class = &css_sched_class;
 	else
+#endif
 		p->sched_class = &fair_sched_class;
 
 	p->prio = prio;
@@ -7284,6 +7311,12 @@ static void __setscheduler_params(struct task_struct *p,
 
 	if (dl_policy(policy))
 		__setparam_dl(p, attr);
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	else if(css_policy(policy)) {
+		printk(KERN_INFO "CSS: setting css params\n");
+		__setparam_css(p, attr);
+	}
+#endif
 	else if (fair_policy(policy))
 		p->static_prio = NICE_TO_PRIO(attr->sched_nice);
 
@@ -7349,6 +7382,13 @@ static int user_check_sched_setscheduler(struct task_struct *p,
 	 */
 	if (dl_policy(policy))
 		goto req_priv;
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (css_policy(policy)){
+		printk(KERN_INFO "CSS: return set policy ok\n");
+		return 0;
+	}
+#endif
 
 	/*
 	 * Treat SCHED_IDLE as nice 20. Only allow a switch to
@@ -7417,6 +7457,12 @@ recheck:
 	    (rt_policy(policy) != (attr->sched_priority != 0)))
 		return -EINVAL;
 
+	// TODO CSS: add a check for css here too
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (css_policy(policy)){
+		 printk(KERN_INFO "CSS: is css policy\n");
+	}
+#endif 
 	if (user) {
 		retval = user_check_sched_setscheduler(p, attr, policy, reset_on_fork);
 		if (retval)
@@ -7428,6 +7474,7 @@ recheck:
 		retval = security_task_setscheduler(p);
 		if (retval)
 			return retval;
+
 	}
 
 	/* Update task specific "requested" clamps */
@@ -7457,6 +7504,13 @@ recheck:
 		retval = -EINVAL;
 		goto unlock;
 	}
+
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (css_policy(policy)){
+		 printk(KERN_INFO "CSS: passou check 5\n");
+	}
+#endif 
 
 	/*
 	 * If not changing anything there's no need to proceed further,
@@ -7518,6 +7572,11 @@ change:
 			cpuset_read_unlock();
 		goto recheck;
 	}
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (css_policy(policy)){
+		 printk(KERN_INFO "CSS: prio %d\n", p->prio);
+	}
+#endif 
 
 	/*
 	 * If setscheduling to SCHED_DEADLINE (or changing the parameters
@@ -7526,6 +7585,11 @@ change:
 	 */
 	if ((dl_policy(policy) || dl_task(p)) && sched_dl_overflow(p, policy, attr)) {
 		retval = -EBUSY;
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (css_policy(policy)){
+		 printk(KERN_INFO "CSS: FAIL check 6\n");
+	}
+#endif 
 		goto unlock;
 	}
 
@@ -7637,6 +7701,12 @@ int sched_setscheduler(struct task_struct *p, int policy,
 
 int sched_setattr(struct task_struct *p, const struct sched_attr *attr)
 {
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (attr->sched_policy == SCHED_CSS){
+		printk(KERN_INFO "CSS: setattr for css called\n");
+		printk(KERN_INFO "CSS: attr deadline %llu\n", attr->sched_deadline);
+	}
+#endif
 	return __sched_setscheduler(p, attr, true, true);
 }
 
@@ -7784,7 +7854,13 @@ err_size:
 
 static void get_params(struct task_struct *p, struct sched_attr *attr)
 {
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	if (task_has_css_policy(p))
+		__getparam_css(p, attr);
+	else if (task_has_dl_policy(p))
+#else
 	if (task_has_dl_policy(p))
+#endif
 		__getparam_dl(p, attr);
 	else if (task_has_rt_policy(p))
 		attr->sched_priority = p->rt_priority;
@@ -9583,9 +9659,17 @@ void __init sched_init(void)
 	int i;
 
 	/* Make sure the linker didn't screw up */
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
 	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
-	       &fair_sched_class != &rt_sched_class + 1 ||
-	       &rt_sched_class   != &dl_sched_class + 1);
+		&fair_sched_class != &css_sched_class + 1 ||
+		&css_sched_class != &rt_sched_class + 1 ||
+		&rt_sched_class != &dl_sched_class + 1);
+#else
+	BUG_ON(&idle_sched_class != &fair_sched_class + 1 ||
+		&fair_sched_class != &rt_sched_class + 1 ||
+		&rt_sched_class != &dl_sched_class + 1);
+#endif
+	
 #ifdef CONFIG_SMP
 	BUG_ON(&dl_sched_class != &stop_sched_class + 1);
 #endif
@@ -9660,6 +9744,11 @@ void __init sched_init(void)
 		init_cfs_rq(&rq->cfs);
 		init_rt_rq(&rq->rt);
 		init_dl_rq(&rq->dl);
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+		init_css_rq(&rq->css);
+#endif
+
 #ifdef CONFIG_FAIR_GROUP_SCHED
 		INIT_LIST_HEAD(&rq->leaf_cfs_rq_list);
 		rq->tmp_alone_branch = &rq->leaf_cfs_rq_list;
