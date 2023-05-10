@@ -16,6 +16,9 @@
 #define Q_MAXCAPACITY 300000000
 #define T_PERIOD 10000000000
 
+enum serverState{Inactive, Active, ActvResid, InactvNonIso};
+ 
+
 struct css_server {
   pid_t servedTask;
 
@@ -26,6 +29,8 @@ struct css_server {
   u64 d_deadline;
   u64 r_residualCap;
   u64 h_replenish;
+
+  int state;
 
   struct hrtimer timer;
 };

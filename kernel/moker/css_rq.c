@@ -18,6 +18,7 @@ void init_css_server(struct css_server *server) {
   server->r_residualCap = 0;
   server->d_deadline = 0;  /* set at job arrival */
   server->h_replenish = 0; /* set after deadline*/
+  server->state = Inactive;
 }
 
 void __setparam_css(struct task_struct *p, const struct sched_attr *attr) {

@@ -2,56 +2,104 @@
 #include "css_rq.h"
 #include "css_task.h"
 #include <linux/timekeeping.h>
+#include <linux/unistd.h>
 
 /*
-  Auxiliary functions
+  Auxiliary macros
 */
+#define _serversList rq->css.serversManager.serversList
+#define _serversCount rq->css.serversManager.serversCount
+
+#define MAX
 
 /*
  * CSS scheduling class.
  * Implements SCHED_CSS
  */
 static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
-  if (p->css.css_period == 0) {
-    /* aperiodic task arrival */
-  }
 
-  p->css.css_deadline = ktime_get_ns() + p->css.css_period;
-  /* print for csv trace analisys */
-  printk("CSS,ENQ_RQ,%d,%llu,%llu\n", p->pid, ktime_get_ns(),
-         p->css.css_deadline);
+  u64 arrivalTime = ktime_get_ns();
 
   raw_spin_lock(&rq->css.lock);
 
   /* Look for a Server that is serving this incoming task */
   int found = 0;
-  int i;
-  for (i = 0; i < rq->css.serversManager.serversCount; i++) {
-    if (rq->css.serversManager.serversList[i].servedTask == p->pid) {
+  int sid;
+  for (sid = 0; sid < _serversCount; sid++) {
+    if (_serversList[sid].servedTask == p->pid) {
       found = 1;
       break;
     }
   }
 
   if (found) {
-    /* activate the server */
-    printk("CSS_DB: active a server\n");
+    /* Case server is active:
+     *      task if buffered and will be served later
+     * Won't do for now, since we have 1 task per server
+     */
+
+    /* Case server is inactive & (a < d) */
+    if ((_serversList[sid].state == Inactive ||
+         _serversList[sid].state == InactvNonIso) &&
+        (arrivalTime < _serversList[sid].d_deadline)) {
+      /* Server became active and
+       * task served with current deadline and capacity
+       */
+      _serversList[sid].state = Active;
+      printk("CSS_DB: active server %d for case a less than d\n", sid);
+    }
+
+    /* Case server is inactive & (a > d) */
+    if ((_serversList[sid].state == Inactive ||
+         _serversList[sid].state == InactvNonIso) &&
+        (arrivalTime > _serversList[sid].d_deadline)) {
+      /* Server became active and replenished */
+      _serversList[sid].c_capacity = _serversList[sid].Q_maxCap;
+      _serversList[sid].d_deadline =
+          arrivalTime + _serversList[sid].T_period; // do we need max(a,d) here?
+      _serversList[sid].h_replenish = _serversList[sid].d_deadline;
+      _serversList[sid].r_residualCap = 0;
+
+      _serversList[sid].state = Active;
+      printk("CSS_DB: active server %d for case a MORE than d\n", sid);
+    }
+
   } else {
     /* new unserved task, allocate a new server */
-    rq->css.serversManager.serversCount++;
-    rq->css.serversManager.serversList = krealloc(
-        rq->css.serversManager.serversList,
-        (sizeof(struct css_server) * rq->css.serversManager.serversCount),
-        GFP_KERNEL);
-    init_css_server(rq->css.serversManager
-                        .serversList[rq->css.serversManager.serversCount - 1]);
-    rq->css.serversManager.serversList[rq->css.serversManager.serversCount - 1]
-        .servedTask = p->pid;
-    printk("CSS_DB: new server for %d\n",
-           rq->css.serversManager
-               .serversList[rq->css.serversManager.serversCount - 1]
-               .servedTask);
+    _serversCount++;
+    _serversList = krealloc(
+        _serversList, (sizeof(struct css_server) * _serversCount), GFP_KERNEL);
+    init_css_server(&_serversList[sid]);
+    _serversList[sid].servedTask = p->pid;
+
+    printk("CSS_DB: new server for %d\n", _serversList[sid].servedTask);
+
+    if (p->css.css_period == 0) {
+      /* aperiodic task arrival */
+      p->css.css_period = _serversList[sid].T_period;
+      p->css.css_runtime = _serversList[sid].Q_maxCap;
+      p->css.css_deadline = arrivalTime + p->css.css_period;
+      _serversList[sid].d_deadline = p->css.css_deadline;
+      _serversList[sid].h_replenish = _serversList[sid].d_deadline;
+
+    } else {
+      /* periodic task arrival */
+      p->css.css_deadline = arrivalTime + p->css.css_period;
+      _serversList[sid].d_deadline = p->css.css_deadline;
+      _serversList[sid].h_replenish = _serversList[sid].d_deadline;
+      _serversList[sid].T_period = p->css.css_period;
+      _serversList[sid].c_capacity = p->css.css_runtime;
+      _serversList[sid].Q_maxCap = _serversList[sid].c_capacity;
+    }
+
+    _serversList[sid].state = Active;
   }
+
+  /* Scheduling follow the EDF policy.
+   * Each task is sorted in a rb_tree according its deadline.
+   * Each CSS Server is bounded to a task (a number of tasks in future impl) by
+   * its pid.
+   */
 
   struct rb_node **new = &rq->css.root.rb_node;
   struct rb_node *parent = NULL;
@@ -70,13 +118,13 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   rb_link_node(&p->css.node, parent, new);
   rb_insert_color(&p->css.node, &rq->css.root);
 
+  /* print for csv trace analisys */
+  printk("CSS,ENQ_RQ,%d,%llu,%llu\n", p->pid, arrivalTime, p->css.css_deadline);
+
   rq->css.nr_running++;
   add_nr_running(rq, 1);
   raw_spin_unlock(&rq->css.lock);
 
-#ifdef CONFIG_MOKER_TRACING
-  // moker_trace(ENQUEUE_RQ, p);
-#endif
 }
 static void dequeue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   /* print for csv trace analisys */
@@ -90,9 +138,6 @@ static void dequeue_task_css(struct rq *rq, struct task_struct *p, int flags) {
 
   raw_spin_unlock(&rq->css.lock);
 
-#ifdef CONFIG_MOKER_TRACING
-  // moker_trace(DEQUEUE_RQ, p);
-#endif
 }
 static void yield_task_css(struct rq *rq) {}
 static bool yield_to_task_css(struct rq *rq, struct task_struct *p) {
