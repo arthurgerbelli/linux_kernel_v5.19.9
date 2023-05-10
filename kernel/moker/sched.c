@@ -1,24 +1,57 @@
 #include "../sched/sched.h"
+#include "css_rq.h"
 #include "css_task.h"
 #include <linux/timekeeping.h>
-
 
 /*
   Auxiliary functions
 */
-
 
 /*
  * CSS scheduling class.
  * Implements SCHED_CSS
  */
 static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
-  printk(KERN_INFO "CSS enqueue %d\n", p->pid);
-  printk("CSS: enqueue task with period %llu\n", p->css.css_period);
+  if (p->css.css_period == 0) {
+    /* aperiodic task arrival */
+  }
+
   p->css.css_deadline = ktime_get_ns() + p->css.css_period;
-  printk("CSS: computed deadline %llu\n", p->css.css_deadline);
+  /* print for csv trace analisys */
+  printk("CSS,ENQ_RQ,%d,%llu,%llu\n", p->pid, ktime_get_ns(),
+         p->css.css_deadline);
 
   raw_spin_lock(&rq->css.lock);
+
+  /* Look for a Server that is serving this incoming task */
+  int found = 0;
+  int i;
+  for (i = 0; i < rq->css.serversManager.serversCount; i++) {
+    if (rq->css.serversManager.serversList[i].servedTask == p->pid) {
+      found = 1;
+      break;
+    }
+  }
+
+  if (found) {
+    /* activate the server */
+    printk("CSS_DB: active a server\n");
+  } else {
+    /* new unserved task, allocate a new server */
+    rq->css.serversManager.serversCount++;
+    rq->css.serversManager.serversList = krealloc(
+        rq->css.serversManager.serversList,
+        (sizeof(struct css_server) * rq->css.serversManager.serversCount),
+        GFP_KERNEL);
+    init_css_server(rq->css.serversManager
+                        .serversList[rq->css.serversManager.serversCount - 1]);
+    rq->css.serversManager.serversList[rq->css.serversManager.serversCount - 1]
+        .servedTask = p->pid;
+    printk("CSS_DB: new server for %d\n",
+           rq->css.serversManager
+               .serversList[rq->css.serversManager.serversCount - 1]
+               .servedTask);
+  }
 
   struct rb_node **new = &rq->css.root.rb_node;
   struct rb_node *parent = NULL;
@@ -37,19 +70,18 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   rb_link_node(&p->css.node, parent, new);
   rb_insert_color(&p->css.node, &rq->css.root);
 
-
-
   rq->css.nr_running++;
   add_nr_running(rq, 1);
   raw_spin_unlock(&rq->css.lock);
 
 #ifdef CONFIG_MOKER_TRACING
-  moker_trace(ENQUEUE_RQ, p);
+  // moker_trace(ENQUEUE_RQ, p);
 #endif
 }
 static void dequeue_task_css(struct rq *rq, struct task_struct *p, int flags) {
-  printk(KERN_INFO "CSS dequeue %d\n", p->pid);
-  // struct sched_css_entity *t = NULL;
+  /* print for csv trace analisys */
+  printk("CSS,DEQ_RQ,%d,%llu\n", p->pid, ktime_get_ns());
+
   raw_spin_lock(&rq->css.lock);
 
   rb_erase(&p->css.node, &rq->css.root);
@@ -59,7 +91,7 @@ static void dequeue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   raw_spin_unlock(&rq->css.lock);
 
 #ifdef CONFIG_MOKER_TRACING
-  moker_trace(DEQUEUE_RQ, p);
+  // moker_trace(DEQUEUE_RQ, p);
 #endif
 }
 static void yield_task_css(struct rq *rq) {}
@@ -68,8 +100,6 @@ static bool yield_to_task_css(struct rq *rq, struct task_struct *p) {
 }
 static void check_preempt_curr_css(struct rq *rq, struct task_struct *p,
                                    int flags) {
-  printk(KERN_INFO "CSS check_preempt\n");
-
   switch (rq->curr->policy) {
   case SCHED_DEADLINE:
   case SCHED_FIFO:
@@ -92,7 +122,6 @@ static struct task_struct *pick_next_task_css(struct rq *rq) {
   struct sched_css_entity *css_node;
 
   if (!RB_EMPTY_ROOT(&rq->css.root)) {
-    printk(KERN_INFO "CSS pick_next_task\n");
 
     raw_spin_lock(&rq->css.lock);
 
@@ -104,8 +133,6 @@ static struct task_struct *pick_next_task_css(struct rq *rq) {
 
     // get addr of the task_struct that contains that css
     p = container_of(css_node, struct task_struct, css);
-
-    printk(KERN_INFO "CSS pick with deadline %llu\n", p->css.css_deadline);
 
     raw_spin_unlock(&rq->css.lock);
   }

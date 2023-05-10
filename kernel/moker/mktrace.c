@@ -45,7 +45,7 @@ static int dequeue(char *buffer) {
       strcpy(evt, "SWT_TO");
       break;
     case ENQUEUE_RQ:
-      strcpy(evt, "ENG_RQ");
+      strcpy(evt, "ENQ_RQ");
       break;
     case DEQUEUE_RQ:
       strcpy(evt, "DEQ_RQ");

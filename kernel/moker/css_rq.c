@@ -4,12 +4,23 @@
 
 void init_css_rq(struct css_rq *rq) {
   rq->root = RB_ROOT;
+  rq->serversManager.serversCount = 0;
+  rq->serversManager.serversList = NULL;
   raw_spin_lock_init(&rq->lock);
   rq->nr_running = 0;
 }
 
+void init_css_server(struct css_server *server) {
+  server->servedTask = 0;
+  server->Q_maxCap = Q_MAXCAPACITY;
+  server->T_period = T_PERIOD;
+  server->c_capacity = server->Q_maxCap;
+  server->r_residualCap = 0;
+  server->d_deadline = 0;  /* set at job arrival */
+  server->h_replenish = 0; /* set after deadline*/
+}
+
 void __setparam_css(struct task_struct *p, const struct sched_attr *attr) {
-  printk(KERN_INFO "CSS __setparam_css\n");
   struct sched_css_entity *css_se = &p->css;
   css_se->css_runtime = attr->sched_runtime;
   css_se->css_deadline = attr->sched_deadline;
