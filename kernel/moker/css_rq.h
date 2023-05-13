@@ -27,11 +27,12 @@ enum job_state {Ready, Running, Done};
 */
 #define _serversList rq->css.serversManager.serversList
 #define _serversCount rq->css.serversManager.serversCount
+#define _pSedf rq->css.serversManager.sedf_ptr
 
 // CSS Server
-struct css_server {
+struct css_server { 
   pid_t servedTask;
-  //struct task_struct *job;
+  struct task_struct *job;
 
   u64 Q_maxCap;
   u64 T_period;
@@ -65,6 +66,7 @@ void css_server_start_replenish_timer(struct css_server *server);
 struct css_servers_manager {
   unsigned int serversCount;
   struct css_server *serversList;
+  struct css_server *sedf_ptr; /* points to next Ar server available for reclaiming*/
 };
 //--------------------------------------------------------
 
