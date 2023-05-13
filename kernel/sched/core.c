@@ -98,6 +98,8 @@
 #include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
 
+//#define CONFIG_MOKER_SCHED_CSS_POLICY
+
 /*
  * Export tracepoints that act as a bare tracehook (ie: have no trace event
  * associated with them) to allow external modules to probe them.
@@ -6478,10 +6480,18 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 	/* print for csv trace analisys */
 	if(css_policy(prev->policy)){
     	printk("CSS,SWT_AY,%d,%llu\n", prev->pid, ktime_get_ns());
-	}
+		if(prev->__state == 0){
+			/* task was preempted */
+			cssrq_interrupt_server(rq, prev);
+		} else if (prev->__state == 1) {
+			/* task finished */
+			cssrq_stop_server(rq, prev);
+		}
+			}
 	
 	if(css_policy(next->policy)){
 		printk("CSS,SWT_TO,%d,%llu\n", next->pid, ktime_get_ns());
+		cssrq_trigger_server_start(rq, next);
 	}
 #endif
 		/* Also unlocks the rq: */
@@ -9720,7 +9730,7 @@ void __init sched_init(void)
 		init_dl_rq(&rq->dl);
 
 #ifdef CONFIG_MOKER_SCHED_CSS_POLICY
-		init_css_rq(&rq->css);
+		cssrq_init_css_rq(&rq->css);
 #endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
