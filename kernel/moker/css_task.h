@@ -9,6 +9,7 @@ struct sched_css_entity {
   u64 css_runtime;  /* Maximum runtime for each instance	*/
   u64 css_deadline; /* Relative deadline of each instance	*/
   u64 css_period;   /* Separation of two instances (period) */
+  unsigned int css_job_state;
 };
 
 #endif
