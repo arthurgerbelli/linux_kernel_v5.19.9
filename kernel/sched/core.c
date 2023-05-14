@@ -6487,7 +6487,7 @@ static void __sched notrace __schedule(unsigned int sched_mode)
 			/* task finished */
 			cssrq_stop_server(rq, prev);
 		}
-			}
+	}
 	
 	if(css_policy(next->policy)){
 		printk("CSS,SWT_TO,%d,%llu\n", next->pid, ktime_get_ns());

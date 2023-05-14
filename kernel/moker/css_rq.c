@@ -7,15 +7,17 @@
 void cssrq_init_css_rq(struct css_rq *rq) {
   rq->root = RB_ROOT;
   rq->serversManager.serversCount = 0;
-  memset(rq->serversManager.serversList, 0,
-         sizeof(struct css_server) * MAXSERVERS);
+  rq->serversManager.serversList = NULL;
   rq->serversManager.sedf_ptr = kmalloc(sizeof(struct css_server), GFP_KERNEL);
   rq->serversManager.sedf_ptr = NULL;
   raw_spin_lock_init(&rq->lock);
   rq->nr_running = 0;
 }
 
-void cssrq_init_css_server(struct css_server *server) {
+void cssrq_init_css_server(struct rq *rq, struct css_server *server) {
+  /*each server instance knows the address of Sedf*/
+  server->pSedf = &rq->css.serversManager.sedf_ptr;
+
   server->job = kmalloc(sizeof(struct task_struct), GFP_KERNEL);
   server->job = NULL;
   server->Q_maxCap = Q_MAXCAPACITY;
@@ -25,7 +27,6 @@ void cssrq_init_css_server(struct css_server *server) {
   server->d_deadline = 0;  /* set at job arrival */
   server->h_replenish = 0; /* set after deadline*/
   server->state = Inactive;
-  server->previous_deadline = 0;
 
   hrtimer_init(&server->run_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
   hrtimer_init(&server->replenish_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
@@ -79,7 +80,6 @@ void cssrq_trigger_server_start(struct rq *rq, struct task_struct *p) {
   }
 
   raw_spin_unlock(&rq->css.lock);
-  //-------------------------------------------
 }
 
 void cssrq_interrupt_server(struct rq *rq, struct task_struct *p) {
@@ -104,7 +104,7 @@ void cssrq_interrupt_server(struct rq *rq, struct task_struct *p) {
 
 void cssrq_stop_server(struct rq *rq, struct task_struct *p) {
   /* Look for the Server that is serving this incoming task */
-    u64 remaining_time;
+  u64 remaining_time;
   int sid;
   sid = css_server_get_sid(rq, p);
 
@@ -147,27 +147,25 @@ void cssrq_stop_server(struct rq *rq, struct task_struct *p) {
 //------------------------------------------------------------------
 
 // CSS Server
+
 enum hrtimer_restart timer_callback_residual_exhausted(struct hrtimer *timer) {
 
   static bool changed_to_capacity = false;
 
+  struct css_server *server = container_of(timer, struct css_server, run_timer);
+
   if (!changed_to_capacity) {
-    struct css_server *server =
-        container_of(timer, struct css_server, run_timer);
+
     printk("CSS_DB: [T: %llu] Residual Cap. used by %d exhausted!\n",
            ktime_get_ns(), server->job->pid);
 
     /* Find address of Sedf */
-    struct css_servers_manager *pServers_manager = NULL;
-    struct css_server *pServers_list = &(pServers_manager->serversList[server->sid]);
-    pServers_manager =
-        container_of(pServers_list, struct css_servers_manager, serversList);
 
     // TODO: check for next residual cap.
     //       for now we are assuming just one
-    pServers_manager->sedf_ptr->r_residualCap = 0;
-    if (ktime_get_ns() < pServers_manager->sedf_ptr->d_deadline) {
-      pServers_manager->sedf_ptr->state = Inactive;
+    (*(server->pSedf))->r_residualCap = 0;
+    if (ktime_get_ns() < (*(server->pSedf))->d_deadline) {
+      (*(server->pSedf))->state = Inactive;
     }
 
     /* restore its deadline */
@@ -229,7 +227,7 @@ void handle_capacity_exhausted(struct css_server *server) {
   } else {
     /* Server depleted */
     server->d_deadline = server->d_deadline + server->T_period;
-    server->job->css.css_abs_deadline = server->deadline;
+    server->job->css.css_abs_deadline = server->d_deadline;
     css_rq_remove_task_from_rq_rbtree(server->job);
     css_rq_add_task_to_rq_rbtree(server->job);
     schedule();
@@ -245,13 +243,12 @@ void css_server_start_run(struct css_server *server, u64 capacity) {
          "%llu\n",
          ktime_get_ns(), server->job->pid, capacity);
 
-          server->job->css.css_job_state = Running;
+  server->job->css.css_job_state = Running;
 
   server->run_ktime = ktime_set(0, capacity);
   hrtimer_start(&server->run_timer, server->run_ktime, HRTIMER_MODE_REL);
   server->run_timer.function = &timer_callback_capacity_exhausted;
 
-  // TODO: p->css.css_job_state = Running;
   server->state = Active;
   server->run_ktime = ktime_set(0, capacity);
   hrtimer_start(&server->run_timer, server->run_ktime, HRTIMER_MODE_REL);
@@ -298,7 +295,7 @@ void css_server_start_replenish_timer(struct css_server *server) {
 int css_server_get_sid(struct rq *rq, struct task_struct *p) {
   int sid, found;
   found = 0;
-  for (sid = 0; sid < MAXSERVERS; sid++) {
+  for (sid = 0; sid < _serversCount; sid++) {
     if (_serversList[sid].job->pid == p->pid) {
       found = 1;
       break;
@@ -319,9 +316,6 @@ void __setparam_css(struct task_struct *p, const struct sched_attr *attr) {
   css_se->css_runtime = attr->sched_runtime;
   css_se->css_deadline = attr->sched_deadline;
   css_se->css_period = attr->sched_period;
-  // dl_se->flags = attr->sched_flags & SCHED_DL_FLAGS;
-  // dl_se->dl_bw = to_ratio(dl_se->dl_period, dl_se->dl_runtime);
-  // dl_se->dl_density = to_ratio(dl_se->dl_deadline, dl_se->dl_runtime);
 }
 
 void __getparam_css(struct task_struct *p, struct sched_attr *attr) {
@@ -331,6 +325,4 @@ void __getparam_css(struct task_struct *p, struct sched_attr *attr) {
   attr->sched_runtime = css_se->css_runtime;
   attr->sched_deadline = css_se->css_deadline;
   attr->sched_period = css_se->css_period;
-  // attr->sched_flags &= ~SCHED_DL_FLAGS;
-  // attr->sched_flags |= dl_se->flags;
 }

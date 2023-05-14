@@ -69,8 +69,9 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   } else {
     /* new unserved task, allocate a new server */
     sid = ++_serversCount;
-    cssrq_init_css_server(&_serversList[sid]);
-    _serversList[sid].sid = sid;
+    _serversList = krealloc(
+        _serversList, (sizeof(struct css_server) * _serversCount), GFP_KERNEL);
+    cssrq_init_css_server(rq, &_serversList[sid]);
     _serversList[sid].job = p;
 
     printk("CSS_DB: new server for %d\n", _serversList[sid].job->pid);
@@ -92,10 +93,13 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
       _serversList[sid].T_period = p->css.css_period;
       _serversList[sid].c_capacity = p->css.css_runtime;
       _serversList[sid].Q_maxCap = _serversList[sid].c_capacity;
-      printk("CSS_DB: periodic task %d capacity = %llu\n",
-             _serversList[sid].job->pid, _serversList[sid].c_capacity);
-    }
 
+      printk("CSS_DB: new periodic task %d\n", _serversList[sid].job->pid);
+      printk("CSS_DB: deadline %llu\n", _serversList[sid].d_deadline);
+      printk("CSS_DB: period %llu\n", _serversList[sid].T_period);
+      printk("CSS_DB: replenish %llu\n", _serversList[sid].h_replenish);
+      printk("CSS_DB: capacity %llu\n", _serversList[sid].c_capacity);
+    }
     /* server is ready now, activate it */
     _serversList[sid].state = Active;
   }
@@ -108,7 +112,6 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
    * its pid.
    */
   add_task_to_rbtree(rq, p);
-
   raw_spin_unlock(&rq->css.lock);
 }
 
@@ -132,7 +135,8 @@ void add_task_to_rbtree(struct rq *rq, struct task_struct *p) {
   }
   rb_link_node(&p->css.node, parent, new);
   rb_insert_color(&p->css.node, &rq->css.root);
-
+  printk("CSS_DB: task %d added deadline %llu\n", p->pid,
+         p->css.css_abs_deadline);
   rq->css.nr_running++;
   add_nr_running(rq, 1);
 }
@@ -153,7 +157,7 @@ static void dequeue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   raw_spin_unlock(&rq->css.lock);
 }
 
- void remove_task_from_rbtree(struct rq *rq, struct task_struct *p) {
+void remove_task_from_rbtree(struct rq *rq, struct task_struct *p) {
   rb_erase(&p->css.node, &rq->css.root);
   rq->css.nr_running--;
   sub_nr_running(rq, 1);
@@ -205,7 +209,8 @@ static struct task_struct *pick_next_task_css(struct rq *rq) {
 
     // get addr of the task_struct that contains that css
     p = container_of(css_node, struct task_struct, css);
-
+    
+    printk("CSS_DB: PICK %d with deadline %llu\n", p->pid, p->css.css_abs_deadline); 
     raw_spin_unlock(&rq->css.lock);
   }
 
