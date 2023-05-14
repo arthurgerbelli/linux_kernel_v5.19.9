@@ -8,6 +8,8 @@
  * Auxiliary functions
  *
  */
+void add_task_to_rbtree(struct rq *rq, struct task_struct *p);
+void remove_task_from_rbtree(struct rq *rq, struct task_struct *p);
 
 int isServerActive(struct css_server *server) {
   return server->state == Active || server->state == ActvResid;
@@ -17,9 +19,8 @@ int isServerActive(struct css_server *server) {
  * Implements SCHED_CSS
  */
 static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
-  int sid, found;
+  int sid;
   u64 arrivalTime;
-
   arrivalTime = ktime_get_ns();
 
   /* print for csv trace analisys */
@@ -28,15 +29,8 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   raw_spin_lock(&rq->css.lock);
 
   /* Look for a Server that is serving this incoming task */
-  found = 0;
-  for (sid = 0; sid < _serversCount; sid++) {
-    if (_serversList[sid].job.pid == p->pid) {
-      found = 1;
-      break;
-    }
-  }
-
-  if (found) {
+  sid = css_server_get_sid(rq, p);
+  if (sid != NOT_FOUND) {
     if (isServerActive(&_serversList[sid])) {
       printk("CSS_DB: early arrival of next job %d, buffer it\n", p->pid);
       _serversList[sid].d_deadline =
@@ -74,13 +68,12 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
 
   } else {
     /* new unserved task, allocate a new server */
-    _serversCount++;
-    _serversList = krealloc(
-        _serversList, (sizeof(struct css_server) * _serversCount), GFP_KERNEL);
+    sid = ++_serversCount;
     cssrq_init_css_server(&_serversList[sid]);
+    _serversList[sid].sid = sid;
     _serversList[sid].job = p;
 
-    printk("CSS_DB: new server for %d\n", _serversList[sid].job.pid);
+    printk("CSS_DB: new server for %d\n", _serversList[sid].job->pid);
 
     if (p->css.css_period == 0) {
       /* aperiodic task arrival */
@@ -100,7 +93,7 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
       _serversList[sid].c_capacity = p->css.css_runtime;
       _serversList[sid].Q_maxCap = _serversList[sid].c_capacity;
       printk("CSS_DB: periodic task %d capacity = %llu\n",
-             _serversList[sid].job.pid, _serversList[sid].c_capacity);
+             _serversList[sid].job->pid, _serversList[sid].c_capacity);
     }
 
     /* server is ready now, activate it */
@@ -114,7 +107,12 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
    * Each CSS Server is bounded to a task (a number of tasks in future impl) by
    * its pid.
    */
+  add_task_to_rbtree(rq, p);
 
+  raw_spin_unlock(&rq->css.lock);
+}
+
+void add_task_to_rbtree(struct rq *rq, struct task_struct *p) {
   struct rb_node **new = &rq->css.root.rb_node;
   struct rb_node *parent = NULL;
   struct sched_css_entity *entry_node;
@@ -137,20 +135,37 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
 
   rq->css.nr_running++;
   add_nr_running(rq, 1);
+}
+
+void css_rq_add_task_to_rq_rbtree(struct task_struct *p) {
+  struct rq *rq = task_rq(p);
+  raw_spin_lock(&rq->css.lock);
+  add_task_to_rbtree(rq, p);
   raw_spin_unlock(&rq->css.lock);
 }
+
 static void dequeue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   /* print for csv trace analisys */
   printk("CSS,DEQ_RQ,%d,%llu\n", p->pid, ktime_get_ns());
 
   raw_spin_lock(&rq->css.lock);
+  remove_task_from_rbtree(rq, p);
+  raw_spin_unlock(&rq->css.lock);
+}
 
+ void remove_task_from_rbtree(struct rq *rq, struct task_struct *p) {
   rb_erase(&p->css.node, &rq->css.root);
   rq->css.nr_running--;
   sub_nr_running(rq, 1);
+}
 
+void css_rq_remove_task_from_rq_rbtree(struct task_struct *p) {
+  struct rq *rq = task_rq(p);
+  raw_spin_lock(&rq->css.lock);
+  remove_task_from_rbtree(rq, p);
   raw_spin_unlock(&rq->css.lock);
 }
+
 static void yield_task_css(struct rq *rq) {}
 static bool yield_to_task_css(struct rq *rq, struct task_struct *p) {
   return true;

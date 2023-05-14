@@ -15,6 +15,8 @@
  *   1x periodic with 0.4U
  *   2x aperiodic with 0.3U each
  */
+#define MAXSERVERS 10
+#define NOT_FOUND -1
 #define Q_MAXCAPACITY 300000000
 #define T_PERIOD 10000000000
 
@@ -31,7 +33,7 @@ enum job_state {Ready, Running, Done};
 
 // CSS Server
 struct css_server { 
-  pid_t servedTask;
+  int sid;
   struct task_struct *job;
 
   u64 Q_maxCap;
@@ -55,8 +57,19 @@ struct css_server {
   struct hrtimer deadline_monitor_timer;
 };
 
-void css_server_start_run(struct css_server *server, u64 capacity);
-void css_server_start_replenish_timer(struct css_server *server);
+/*private*/
+enum hrtimer_restart timer_callback_residual_exhausted(struct hrtimer *timer);
+enum hrtimer_restart timer_callback_capacity_exhausted(struct hrtimer *timer);
+enum hrtimer_restart timer_callback_replenishment(struct hrtimer *timer);
+
+void css_server_consume_residual(struct css_server *server, struct css_server *sedf);
+
+void handle_capacity_exhausted(struct css_server *server);
+/*public*/
+
+int css_server_get_sid(struct rq *rq, struct task_struct *p);
+extern void css_server_start_run(struct css_server *server, u64 capacity);
+extern void css_server_start_replenish_timer(struct css_server *server);
 
 
 
@@ -65,7 +78,7 @@ void css_server_start_replenish_timer(struct css_server *server);
 // CSS Severs Manager
 struct css_servers_manager {
   unsigned int serversCount;
-  struct css_server *serversList;
+  struct css_server serversList[MAXSERVERS];
   struct css_server *sedf_ptr; /* points to next Ar server available for reclaiming*/
 };
 //--------------------------------------------------------
@@ -88,6 +101,10 @@ void cssrq_init_css_rq(struct css_rq *rq);
 void cssrq_trigger_server_start(struct rq *rq, struct task_struct *p);
 void cssrq_interrupt_server(struct rq *rq, struct task_struct *p);
 void cssrq_stop_server(struct rq *rq, struct task_struct *p);
+/* method defined in sched.c*/
+void css_rq_add_task_to_rq_rbtree(struct task_struct *p);
+/* method defined in sched.c*/
+void css_rq_remove_task_from_rq_rbtree(struct task_struct *p);
 
 //--------------------------------------------------------
 
