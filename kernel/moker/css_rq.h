@@ -1,0 +1,119 @@
+#ifndef __CSS_RQ_H_
+#define __CSS_RQ_H_
+
+#include <linux/hashtable.h>
+#include <linux/hrtimer.h>
+#include <linux/ktime.h>
+#include <linux/rbtree.h>
+#include <linux/sched.h>
+#include <linux/spinlock.h>
+#include <linux/unistd.h>
+#include <uapi/linux/sched.h>
+#include <uapi/linux/sched/types.h>
+
+/* Initial defines, run 1:
+ *   1x periodic with 0.4U
+ *   2x aperiodic with 0.3U each
+ */
+#define Q_MAXCAPACITY 300000000
+#define T_PERIOD 10000000000
+
+enum serverState { Inactive, Active, ActvResid, InactvNonIso };
+enum job_state {Ready, Running, Done};
+
+
+/*
+  Auxiliary macros
+*/
+#define _serversList rq->css.serversManager.serversList
+#define _serversCount rq->css.serversManager.serversCount
+
+// CSS Server
+struct css_server {
+  pid_t servedTask;
+  //struct task_struct *job;
+
+  u64 Q_maxCap;
+  u64 T_period;
+
+  u64 c_capacity;
+  u64 d_deadline;
+  u64 r_residualCap;
+  u64 h_replenish;
+  u64 previous_deadline;
+
+  unsigned int state;
+
+  ktime_t run_ktime;
+  struct hrtimer run_timer;
+
+  ktime_t replenish_ktime;
+  struct hrtimer replenish_timer;
+
+  ktime_t deadline_ktime;
+  struct hrtimer deadline_monitor_timer;
+};
+
+void css_server_start_run(struct css_server *server, u64 capacity);
+void css_server_start_replenish_timer(struct css_server *server);
+
+
+
+//--------------------------------------------------------
+
+// CSS Severs Manager
+struct css_servers_manager {
+  unsigned int serversCount;
+  struct css_server *serversList;
+};
+//--------------------------------------------------------
+
+// CSS Run queue
+struct css_rq {
+  struct rb_root root;
+
+  struct css_servers_manager serversManager;
+
+  raw_spinlock_t lock;
+  unsigned nr_running;
+};
+
+/* private methods */
+
+/* public methods */
+void cssrq_init_css_server(struct css_server *server);
+void cssrq_init_css_rq(struct css_rq *rq);
+void cssrq_trigger_server_start(struct rq *rq, struct task_struct *p);
+void cssrq_interrupt_server(struct rq *rq, struct task_struct *p);
+void cssrq_stop_server(struct rq *rq, struct task_struct *p);
+
+//--------------------------------------------------------
+
+// External methods
+extern void __setparam_css(struct task_struct *p,
+                           const struct sched_attr *attr);
+extern void __getparam_css(struct task_struct *p, struct sched_attr *attr);
+//--------------------------------------------------------
+#endif
+
+/*
+ * Note: Assuming no more than one job per server now
+ * run_timer related events:
+ *   - switched to task: start run_timer with capacity (c). done, TODO: get
+ * remaining cap
+ *   - task switched away (__state = 0): Job interrupted. done
+ *       Stop run_timer;
+ *       Decrement the capacity: c = r_time;
+ *       Server remain as active.
+ *   - dequeue task: Job finished, stops run_timer and get the remaining time
+ * (r_time). If r_time < 0, update the remaining capacity (r): r = r_time; and c
+ * = 0; Keep the server active and mark as Ar If r_time = 0, server goes to
+ * inactive.
+ *   - run_timer expires: means that the capacity is exhausted.
+ *       TODO: what to do??? schedule();
+ *
+ *  replenish_timer related events:
+ *    - expires: - recharge c
+ *               - if no pending job, goes to Inactive, even with some reserved
+ * capacity left
+ */

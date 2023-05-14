@@ -20,7 +20,6 @@
 #include <linux/sched/task_flags.h>
 #include <linux/sched/task.h>
 #include <linux/sched/topology.h>
-
 #include <linux/atomic.h>
 #include <linux/bitmap.h>
 #include <linux/bug.h>
@@ -94,6 +93,14 @@
 # define SCHED_WARN_ON(x)      WARN_ONCE(x, #x)
 #else
 # define SCHED_WARN_ON(x)      ({ (void)(x), 0; })
+#endif
+
+#ifdef CONFIG_MOKER_TRACING
+#include "../moker/mktrace.h"
+#endif
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+#include "../moker/css_rq.h"
 #endif
 
 struct rq;
@@ -195,10 +202,23 @@ static inline int dl_policy(int policy)
 {
 	return policy == SCHED_DEADLINE;
 }
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+static inline int css_policy(int policy)
+{
+	return policy == SCHED_CSS;
+}
+#endif
+
 static inline bool valid_policy(int policy)
 {
 	return idle_policy(policy) || fair_policy(policy) ||
-		rt_policy(policy) || dl_policy(policy);
+	rt_policy(policy) || dl_policy(policy)
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	|| css_policy(policy)
+#endif
+	;
+
 }
 
 static inline int task_has_idle_policy(struct task_struct *p)
@@ -215,6 +235,12 @@ static inline int task_has_dl_policy(struct task_struct *p)
 {
 	return dl_policy(p->policy);
 }
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+static inline int task_has_css_policy(struct task_struct *p)
+{
+	return css_policy(p->policy);
+}
+#endif
 
 #define cap_scale(v, s) ((v)*(s) >> SCHED_CAPACITY_SHIFT)
 
@@ -265,6 +291,7 @@ dl_entity_preempt(struct sched_dl_entity *a, struct sched_dl_entity *b)
 	return dl_entity_is_special(a) ||
 	       dl_time_before(a->deadline, b->deadline);
 }
+// TODO CSS: probably we have to implement this
 
 /*
  * This is the priority-queue data structure of the RT scheduling class:
@@ -954,6 +981,10 @@ struct rq {
 	struct cfs_rq		cfs;
 	struct rt_rq		rt;
 	struct dl_rq		dl;
+
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+	struct css_rq css;
+#endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	/* list of leaf cfs_rq on this CPU: */
@@ -2212,6 +2243,9 @@ extern struct sched_class __sched_class_lowest[];
 extern const struct sched_class stop_sched_class;
 extern const struct sched_class dl_sched_class;
 extern const struct sched_class rt_sched_class;
+#ifdef CONFIG_MOKER_SCHED_CSS_POLICY
+extern const struct sched_class css_sched_class;
+#endif
 extern const struct sched_class fair_sched_class;
 extern const struct sched_class idle_sched_class;
 
