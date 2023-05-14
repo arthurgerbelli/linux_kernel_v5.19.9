@@ -6,6 +6,8 @@
 struct sched_css_entity {
   struct rb_node node;
 
+  unsigned int css_sid; /* Server id assigned to this task*/
+
   u64 css_runtime;  /* Maximum runtime */
   u64 css_deadline; /* Relative deadline, set by the scheduler or the user	*/
   u64 css_abs_deadline; /* Absolute deadline, set only by the scheduler	*/

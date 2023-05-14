@@ -29,13 +29,16 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   raw_spin_lock(&rq->css.lock);
 
   /* Look for a Server that is serving this incoming task */
-  sid = css_server_get_sid(rq, p);
-  if (sid != NOT_FOUND) {
+  sid = p->css.css_sid;
+  if (sid != 0) {
     if (isServerActive(&_serversList[sid])) {
       printk("CSS_DB: early arrival of next job %d, buffer it\n", p->pid);
       _serversList[sid].d_deadline =
           _serversList[sid].d_deadline + _serversList[sid].T_period;
       p->css.css_abs_deadline = _serversList[sid].d_deadline;
+
+      // TODO: we can use the remove/add to rebalance the rbtree and the
+      // schedule() call to give up the cpu here.
 
       /* Set as Active, so it can be replenished when the time comes */
       _serversList[sid].state = Active;
@@ -53,10 +56,9 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
         /* Case server is inactive & (a >= d) */
         /* Server became active and replenished */
         _serversList[sid].c_capacity = _serversList[sid].Q_maxCap;
-        //_serversList[sid].previous_deadline = _serversList[sid].d_deadline;
-        // do we need max(a,d-1) here?
-        _serversList[sid].d_deadline = arrivalTime + _serversList[sid].T_period;
-        p->css.css_abs_deadline = _serversList[sid].d_deadline;
+
+        p->css.css_abs_deadline = arrivalTime + p->css.css_deadline;
+        _serversList[sid].d_deadline = p->css.css_abs_deadline;
         _serversList[sid].h_replenish = _serversList[sid].d_deadline;
         _serversList[sid].r_residualCap = 0;
 
@@ -69,6 +71,7 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
   } else {
     /* new unserved task, allocate a new server */
     sid = ++_serversCount;
+    p->css.css_sid = sid;
     _serversList = krealloc(
         _serversList, (sizeof(struct css_server) * _serversCount), GFP_KERNEL);
     cssrq_init_css_server(rq, &_serversList[sid]);
@@ -93,24 +96,11 @@ static void enqueue_task_css(struct rq *rq, struct task_struct *p, int flags) {
       _serversList[sid].T_period = p->css.css_period;
       _serversList[sid].c_capacity = p->css.css_runtime;
       _serversList[sid].Q_maxCap = _serversList[sid].c_capacity;
-
-      printk("CSS_DB: new periodic task %d\n", _serversList[sid].job->pid);
-      printk("CSS_DB: deadline %llu\n", _serversList[sid].d_deadline);
-      printk("CSS_DB: period %llu\n", _serversList[sid].T_period);
-      printk("CSS_DB: replenish %llu\n", _serversList[sid].h_replenish);
-      printk("CSS_DB: capacity %llu\n", _serversList[sid].c_capacity);
     }
-    /* server is ready now, activate it */
-    _serversList[sid].state = Active;
   }
 
   p->css.css_job_state = Ready;
 
-  /* Scheduling follow the EDF policy.
-   * Each task is sorted in a rb_tree according its server's deadline.
-   * Each CSS Server is bounded to a task (a number of tasks in future impl) by
-   * its pid.
-   */
   add_task_to_rbtree(rq, p);
   raw_spin_unlock(&rq->css.lock);
 }
@@ -119,6 +109,12 @@ void add_task_to_rbtree(struct rq *rq, struct task_struct *p) {
   struct rb_node **new = &rq->css.root.rb_node;
   struct rb_node *parent = NULL;
   struct sched_css_entity *entry_node;
+
+  /* Scheduling follow the EDF policy.
+   * Each task is sorted in a rb_tree according its server's deadline.
+   * Each CSS Server is bounded to a task (a number of tasks in future impl) by
+   * its pid.
+   */
 
   while (*new) {
     parent = *new;
@@ -209,8 +205,9 @@ static struct task_struct *pick_next_task_css(struct rq *rq) {
 
     // get addr of the task_struct that contains that css
     p = container_of(css_node, struct task_struct, css);
-    
-    printk("CSS_DB: PICK %d with deadline %llu\n", p->pid, p->css.css_abs_deadline); 
+
+    printk("CSS_DB: PICK %d with deadline %llu\n", p->pid,
+           p->css.css_abs_deadline);
     raw_spin_unlock(&rq->css.lock);
   }
 

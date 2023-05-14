@@ -17,9 +17,6 @@ void cssrq_init_css_rq(struct css_rq *rq) {
 void cssrq_init_css_server(struct rq *rq, struct css_server *server) {
   /*each server instance knows the address of Sedf*/
   server->pSedf = &rq->css.serversManager.sedf_ptr;
-
-  server->job = kmalloc(sizeof(struct task_struct), GFP_KERNEL);
-  server->job = NULL;
   server->Q_maxCap = Q_MAXCAPACITY;
   server->T_period = T_PERIOD;
   server->c_capacity = server->Q_maxCap;
@@ -44,7 +41,7 @@ enum hrtimer_restart timer_callback_deadline_reached(struct hrtimer *timer) {
 
 void cssrq_trigger_server_start(struct rq *rq, struct task_struct *p) {
   int sid;
-  sid = css_server_get_sid(rq, p);
+  sid = p->css.css_sid;
 
   raw_spin_lock(&rq->css.lock);
 
@@ -85,7 +82,7 @@ void cssrq_trigger_server_start(struct rq *rq, struct task_struct *p) {
 void cssrq_interrupt_server(struct rq *rq, struct task_struct *p) {
   /* Look for a Server that is serving this incoming task */
   int sid;
-  sid = css_server_get_sid(rq, p);
+  sid = p->css.css_sid;
 
   raw_spin_lock(&rq->css.lock);
 
@@ -106,7 +103,7 @@ void cssrq_stop_server(struct rq *rq, struct task_struct *p) {
   /* Look for the Server that is serving this incoming task */
   u64 remaining_time;
   int sid;
-  sid = css_server_get_sid(rq, p);
+  sid = p->css.css_sid;
 
   raw_spin_lock(&rq->css.lock);
 
@@ -292,19 +289,6 @@ void css_server_start_replenish_timer(struct css_server *server) {
   server->replenish_timer.function = &timer_callback_replenishment;
 }
 
-int css_server_get_sid(struct rq *rq, struct task_struct *p) {
-  int sid, found;
-  found = 0;
-  for (sid = 0; sid < _serversCount; sid++) {
-    if (_serversList[sid].job->pid == p->pid) {
-      found = 1;
-      break;
-    }
-  }
-
-  return found ? sid : -1;
-}
-
 //------------------------------------------------------------------
 
 /*
@@ -316,6 +300,7 @@ void __setparam_css(struct task_struct *p, const struct sched_attr *attr) {
   css_se->css_runtime = attr->sched_runtime;
   css_se->css_deadline = attr->sched_deadline;
   css_se->css_period = attr->sched_period;
+  css_se->css_sid = 0;
 }
 
 void __getparam_css(struct task_struct *p, struct sched_attr *attr) {

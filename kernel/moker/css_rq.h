@@ -58,7 +58,6 @@ void css_server_consume_residual(struct css_server *server, struct css_server *s
 void handle_capacity_exhausted(struct css_server *server);
 
 /*public*/
-int css_server_get_sid(struct rq *rq, struct task_struct *p);
 extern void css_server_start_run(struct css_server *server, u64 capacity);
 extern void css_server_start_replenish_timer(struct css_server *server);
 
